@@ -23,7 +23,7 @@ First stable release.
   what changed; statuses age with time between checks.
 - React + TypeScript web interface with a responsive pastel design.
 - Docker setup (`docker compose up --build`) with a persistent SQLite volume, non-root containers and health checks.
-- GitHub Actions CI: Ruff + Pytest (Python 3.10 and 3.12), ESLint + Vitest + build, and a Docker build and smoke test.
+- GitHub Actions CI: Ruff + Pytest (Python 3.11 and 3.12), ESLint + Vitest + build (Node 22), and a Docker build and smoke test.
 - `scripts/demo.py` to run the app against generated certificates for documentation-only domains (screenshots and demos).
 - Documentation: README, CONTRIBUTING, SECURITY and a demo walkthrough.
 
@@ -37,8 +37,8 @@ First stable release.
   stored or echoed back.
 - Unparseable certificates presented by a remote server produce a clean error (and a recorded failed check in the Monitor)
   instead of an internal error.
-- Dependencies audited: no known vulnerabilities in the Python or npm dependency sets at release. Python 3.10+ is
-  required so that patched `starlette`, `python-multipart` and `anyio` releases can be installed.
+- Dependencies audited: no known vulnerabilities in the Python or npm dependency sets at release. Python 3.11+ is
+  required (3.10 is end-of-life) so that patched `starlette`, `python-multipart` and `anyio` releases can be installed.
 
 ### Known limitations
 

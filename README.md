@@ -70,7 +70,7 @@ After capturing (see docs/screenshots/README.md), uncomment:
 
 | Layer | Stack |
 |---|---|
-| Backend | Python 3.10+, FastAPI, `cryptography`, SQLite, `certifi` (CA bundle) |
+| Backend | Python 3.11+, FastAPI, `cryptography`, SQLite, `certifi` (CA bundle) |
 | Frontend | React 18, TypeScript, Vite |
 | Tests | Pytest · Vitest + Testing Library |
 | Quality | Ruff · ESLint · GitHub Actions |
@@ -79,8 +79,8 @@ After capturing (see docs/screenshots/README.md), uncomment:
 ## Prerequisites
 
 - **Docker route:** Docker with the Compose plugin.
-- **Local route:** Python **3.10 or newer** (older versions cannot install the patched dependency versions) and
-  Node.js **20 or newer**.
+- **Local route:** Python **3.11 or newer** (older versions are end-of-life and cannot install the patched dependency versions) and
+  Node.js **22 or newer**.
 
 ## Installation
 
@@ -269,7 +269,9 @@ smoke-tests the Docker setup.
 ## Security
 
 CertWatch makes outbound connections on behalf of its users, so it is built to avoid becoming a proxy into internal networks.
-Full details and the reporting process are in [SECURITY.md](SECURITY.md). In short:
+Deployment guidance (including why it must not be exposed publicly without access controls) is in
+[Deployment and Security Considerations](#deployment-and-security-considerations); the reporting process is in
+[SECURITY.md](SECURITY.md). In short:
 
 - **SSRF:** input must be a bare fully-qualified domain name (no URLs, ports, IP literals). The port is a constant (443).
   DNS is resolved once; if *any* answer is private, loopback, link-local, multicast, reserved, carrier-grade NAT or an
@@ -280,9 +282,159 @@ Full details and the reporting process are in [SECURITY.md](SECURITY.md). In sho
 - **Uploads (CertDiff):** 1 MB per file enforced on declared and received bytes; PEM only; private keys rejected; processed in memory, never stored or echoed.
 - **TLS verification is never silently disabled.** Where an unverified read is needed to *display* a broken certificate, the result is always reported as untrusted with the reason.
 
+## Deployment and Security Considerations
+
+> **CertWatch has no authentication and must not be exposed to the public internet without access controls.**
+> It is designed for a single trusted user on a laptop, a private network or behind a VPN. The default Docker setup
+> publishes the UI on `127.0.0.1` only, for exactly this reason.
+
+### What anyone who can reach the app can do
+
+There are no accounts, sessions or API keys. Anyone who can send requests to CertWatch can:
+
+- make **your server** open TLS connections to any public host on port 443 (Inspector, Monitor);
+- add, check and delete monitored domains and read their full history (Monitor);
+- upload files for the server to parse (CertDiff);
+- use up the server's worker capacity (see [Rate limits](#are-the-rate-limits-and-domain-restrictions-enough)).
+
+### Recommended ways to deploy
+
+Pick **one** of these. They are listed from simplest to most flexible.
+
+**1. Local only (default).** `docker compose up --build` binds the UI to `127.0.0.1:8080`. Nothing else can reach it.
+
+**2. Private network or VPN.** Run CertWatch on a machine that is only reachable over a private network or VPN
+(WireGuard, Tailscale or similar) and bind the published port to that interface instead of the loopback address, by
+editing the `ports:` line in `docker-compose.yml`:
+
+```yaml
+    ports:
+      - "100.64.0.5:8080:8080"     # your VPN / private interface address, never 0.0.0.0
+```
+
+Add a host firewall rule so the port is not reachable from other networks.
+
+**3. Reverse proxy with authentication.** Keep CertWatch bound to `127.0.0.1` and put an authenticating TLS proxy in
+front of it. Anything that adds real authentication is fine (basic auth, an OIDC proxy such as oauth2-proxy or
+Authelia, Cloudflare Access, ...). Two minimal examples:
+
+```
+# Caddy (v2.8+; older versions call the directive `basicauth`) - automatic HTTPS
+certwatch.example.org {
+    basic_auth {
+        # generate the hash with:  caddy hash-password
+        alice  <password-hash>
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+```nginx
+# nginx on the host (htpasswd -c /etc/nginx/certwatch.htpasswd alice)
+server {
+    listen 443 ssl;
+    server_name certwatch.example.org;
+    # ssl_certificate / ssl_certificate_key ...
+
+    auth_basic           "CertWatch";
+    auth_basic_user_file /etc/nginx/certwatch.htpasswd;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+Notes for proxy deployments:
+
+- **Never publish the backend (port 8000).** The Compose file sets `FORWARDED_ALLOW_IPS=*` so the backend trusts the
+  client address that CertWatch's own nginx container passes along. That is safe only because the backend is reachable
+  solely from that container. If port 8000 is ever reachable directly, anyone can send a fake `X-Forwarded-For` header
+  and get a fresh rate-limit budget on every request.
+- **Rate limits behind your own proxy.** CertWatch's nginx container reports the address it was contacted from. Behind
+  another proxy, every user therefore appears as that proxy and **shares one rate-limit budget**. If you need per-user
+  limits, add `set_real_ip_from <your proxy's address as seen by the container>;` and `real_ip_header X-Forwarded-For;`
+  to `frontend/nginx.conf`.
+- Always terminate TLS at the proxy when it is reachable over an untrusted network; basic auth over plain HTTP is not
+  protection.
+- The interactive API docs (`/docs`) exist only on the backend, which the proxy setup does not expose.
+
+### Risks of server-side TLS connections
+
+CertWatch's job is to connect, from your server, to hostnames chosen by whoever uses it. That is inherently
+sensitive, even with the protections below:
+
+| Risk | What it means |
+|---|---|
+| **SSRF** | An attacker tries to make the server reach internal services (admin panels, databases, cloud metadata such as `169.254.169.254`) by supplying a name or address that points inside your network. |
+| **Probing of public hosts** | Anyone can create a DNS name pointing at *any* public IP, so CertWatch can be used to test whether port 443 is open on a public host. The different outcomes (connection refused, timeout, TLS error, certificate) are visible in the results. |
+| **Your IP appears in other people's logs** | Targets see connections from your server. Abuse complaints would come to you. |
+| **DNS side channel** | Lookups come from your resolver, so an attacker running a DNS server learns your resolver's address and can see when lookups happen. |
+| **Internal DNS names can be guessed** | If your resolver also answers internal names, the error for a name that resolves to a private address (`blocked_address`) differs from the one for a name that does not exist (`dns_error`). That lets a caller test whether internal hostnames exist. It reveals only existence, never the address. |
+| **Hostile servers** | A remote server can present odd certificates, stall the handshake, or accept a connection and say nothing. |
+| **Resource exhaustion** | Each inspection holds a worker thread until it finishes or times out. |
+
+### SSRF and abuse protections that exist today
+
+| Protection | How it works |
+|---|---|
+| Strict input | Only a bare, fully qualified domain name is accepted. URLs, ports, paths, credentials, single-label names and IP literals (including `0x7f.1`-style forms) are rejected before any lookup. |
+| Port is a constant | Connections go to port **443** only. There is no port parameter anywhere in the API. |
+| Every address must be public | DNS is resolved **once**. If *any* returned address is private, loopback, link-local, multicast, reserved, unspecified, carrier-grade NAT, documentation/benchmark space, or an IPv6 form that can embed an IPv4 address (mapped, 6to4, Teredo, NAT64), the whole request is refused. Mixed answers (one public, one internal) are refused too. |
+| DNS rebinding | The TCP connection goes to the already-validated IP address, never to the hostname, so a second DNS answer cannot redirect it. SNI and certificate hostname checks still use the original name. |
+| No application traffic | CertWatch performs a TLS handshake and reads the certificate. It sends no HTTP request, follows no redirects and reads no response body. |
+| Re-validation on every check | Each Monitor check repeats validation and the address checks. A saved domain that later starts resolving to an internal address is refused on its next check. |
+| Minimum TLS 1.2 | Older protocol versions are not negotiated. |
+| Bounded work | DNS 3 s, TCP connect 5 s and handshake 5 s per address (at most 3 addresses), and a 15 s overall deadline; at most 8 inspections at once, shared by Inspector and Monitor. |
+| Hostile certificates | A certificate that cannot be parsed produces a clean `tls_error` (and a recorded failed check in the Monitor), not a crash. |
+
+**Defence in depth.** These checks live in the application. If you run CertWatch somewhere with sensitive internal
+services, also restrict its **network egress**: for Docker on Linux, add host firewall rules in the `DOCKER-USER` chain
+that drop traffic from the CertWatch containers to private ranges and the cloud metadata address, for example
+`iptables -I DOCKER-USER -d 169.254.169.254 -j DROP`. On cloud hosts, enforce the metadata service's token requirement
+(for example AWS IMDSv2). Inside Docker, names such as `backend` are rejected as single-label names, and any container
+address they could resolve to is private and blocked.
+
+### Are the rate limits and domain restrictions enough?
+
+| Control | Setting | Assessment |
+|---|---|---|
+| Inspector and CertDiff rate limit | 10 requests / minute / client (shared) | Good for one user or a trusted team. |
+| Monitor add and check rate limit | 20 requests / minute / client (separate budget) | Same. |
+| Per-domain check cooldown | 10 s | Stops repeated manual checks hammering one host. Does not apply to the Inspector. |
+| Concurrency cap | 8 inspections at once (global) | Protects the server, but is a shared resource (see below). |
+| Monitored-domain cap | 100 total | Bounds database growth, but is global, not per user. |
+| Domain and address validation | See above | **Sufficient to keep the server out of private networks.** It does *not* stop use against public hosts. |
+
+**Verdict:** sufficient for local, single-user and trusted private deployments. **Not sufficient as the only protection
+for a public deployment.** Specifically:
+
+1. Limits are **per client address**, so an attacker with many addresses is not slowed down, and a spoofed address header
+   defeats them if the backend is reachable directly.
+2. Counters are **in memory and per process**: they reset on restart and are multiplied by the number of workers.
+3. The **global concurrency cap can be exhausted** by a few clients, which makes everyone else see `503 busy`. That is an
+   availability problem, not a data leak.
+4. There is **no allow-list or deny-list of targets**, so public hosts can be probed (see the risk table).
+5. The 100-domain cap and the Monitor API are shared by everyone who can reach the app.
+
+These are inherent to an unauthenticated design, and tighter limits would not change that. That is why the guidance
+above is to require authentication or network-level access control before exposing CertWatch, not to rely on the limits.
+
+### Hardening checklist for a shared or internet-reachable deployment
+
+- [ ] Authentication in front of **both** the UI and `/api/` (reverse proxy, VPN or private network).
+- [ ] TLS on any network you do not control.
+- [ ] Backend port 8000 not published; only the proxy can reach it.
+- [ ] Egress from the CertWatch containers filtered (private ranges and cloud metadata address blocked).
+- [ ] Proxy-level rate limiting (for example nginx `limit_req`) in addition to the built-in limits.
+- [ ] Only one CertWatch instance, or an understanding that rate-limit counters are per process.
+- [ ] The `certwatch-data` volume backed up if you rely on the monitoring history.
+- [ ] Images and dependencies kept up to date (`pip-audit`, `npm audit`).
+
 ## Limitations
 
-- **No authentication.** The Monitor API is for local, single-user use. Docker publishes the UI on `127.0.0.1` only; put it behind an authenticating reverse proxy before exposing it more widely.
+- **No authentication.** CertWatch must not be exposed publicly without access controls; see [Deployment and Security Considerations](#deployment-and-security-considerations). Docker publishes the UI on `127.0.0.1` only.
 - **Port 443 only**, direct TLS only (no STARTTLS, no other ports, no client certificates). Servers that only support TLS 1.0/1.1 cannot be inspected.
 - **Leaf certificate only.** The Inspector reports the server's certificate; it does not display the intermediate chain.
 - **Trust uses the Mozilla CA bundle** (`certifi`), not your operating system's store. Certificates issued by a private/corporate CA appear as untrusted.
