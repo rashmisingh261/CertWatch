@@ -43,3 +43,6 @@ npm-debug.log*
 backend/data/
 *.db-wal
 *.db-shm
+
+# Personal notes
+txt run
