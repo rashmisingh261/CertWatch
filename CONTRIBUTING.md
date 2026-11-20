@@ -7,7 +7,7 @@ Thanks for helping! CertWatch is intentionally small; changes that keep it simpl
 Prerequisites: Python 3.10+, Node.js 20+ (Docker is optional).
 
 ```bash
-git clone https://github.com/Rashmi1526/CertWatch.git && cd CertWatch
+git clone https://github.com/rashmisingh261/CertWatch.git && cd CertWatch
 
 # Backend
 cd backend

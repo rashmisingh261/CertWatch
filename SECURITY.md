@@ -12,7 +12,7 @@
 **Please do not open a public issue for security problems.**
 
 Report privately using GitHub's *Report a vulnerability* feature: open the repository's **Security** tab →
-**Report a vulnerability** (<https://github.com/Rashmi1526/CertWatch/security/advisories/new>).
+**Report a vulnerability** (<https://github.com/rashmisingh261/CertWatch/security/advisories/new>).
 
 Please include what you found, the steps or request needed to reproduce it, the affected version/commit, and the impact you
 expect. A proof of concept that uses only your own systems is ideal; do not test against infrastructure you do not own.

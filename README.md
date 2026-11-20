@@ -2,7 +2,7 @@
 
 **A small, self-hosted toolkit for looking at TLS certificates: inspect them, compare them, and keep an eye on them.**
 
-[![CI](https://github.com/Rashmi1526/CertWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Rashmi1526/CertWatch/actions/workflows/ci.yml)
+[![CI](https://github.com/rashmisingh261/CertWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/rashmisingh261/CertWatch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why CertWatch?
@@ -87,7 +87,7 @@ After capturing (see docs/screenshots/README.md), uncomment:
 ### Option 1: Docker (recommended)
 
 ```bash
-git clone https://github.com/Rashmi1526/CertWatch.git
+git clone https://github.com/rashmisingh261/CertWatch.git
 cd CertWatch
 docker compose up --build
 ```
