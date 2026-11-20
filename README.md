@@ -5,6 +5,11 @@
 [![CI](https://github.com/rashmisingh261/CertWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/rashmisingh261/CertWatch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+> **Private demo.** CertWatch has **no authentication**. It is intended for private use only: on your own machine, or
+> from your own devices over a private network or VPN such as Tailscale. **Do not expose it to the public internet
+> without authentication in front of it.** See [Accessing CertWatch](#accessing-certwatch-private-demo) and
+> [Deployment and Security Considerations](#deployment-and-security-considerations).
+
 ## Why CertWatch?
 
 Expired and unexpectedly replaced certificates cause outages, and the tools for checking them are either a pile of
@@ -96,7 +101,8 @@ Open **http://localhost:8080**.
 
 - The monitor database lives in the `certwatch-data` Docker volume and survives restarts and rebuilds.
   `docker compose down` keeps it; `docker compose down --volumes` deletes it.
-- The UI is published on **127.0.0.1 only**, because the Monitor API has no authentication. To use another port, copy
+- The UI is published on **127.0.0.1 only** by default, because CertWatch has no authentication. To reach it from your
+  other devices privately, see [Accessing CertWatch](#accessing-certwatch-private-demo). To use another port, copy
   `.env.example` to `.env` and set `CERTWATCH_PORT`.
 - The backend container is not published; only the nginx frontend can reach it.
 
@@ -128,10 +134,69 @@ database is created at `backend/data/certwatch.db` on first start (git-ignored).
 | Variable | Default | Purpose |
 |---|---|---|
 | `CERTWATCH_DB_PATH` | `backend/data/certwatch.db` (`/data/certwatch.db` in Docker) | SQLite file location |
+| `CERTWATCH_BIND` | `127.0.0.1` | Docker only: address the web UI is published on (set in `.env`). Leave at the default, or use your Tailscale address; never `0.0.0.0` |
 | `CERTWATCH_PORT` | `8080` | Docker only: host port for the web UI (set in `.env`) |
 
 CertWatch needs no secrets and reads no credentials. Operational limits (timeouts, rate limits, upload size, the
 100-domain monitor cap) are constants in [backend/app/core/config.py](backend/app/core/config.py).
+
+## Accessing CertWatch (private demo)
+
+CertWatch is meant to be used **privately**: on the machine it runs on, or from your own devices over a private network
+such as [Tailscale](https://tailscale.com). It is never meant to be reachable from the public internet.
+
+### On the same machine
+
+| How you started it | Open |
+|---|---|
+| `docker compose up --build` | **http://localhost:8080** |
+| Local development (backend + `npm run dev`) | **http://localhost:5173** |
+
+In both cases the servers listen on `127.0.0.1` only, so other computers cannot reach them. With Docker, the backend is
+not published at all; only the web container can talk to it. Stop CertWatch with `docker compose down` (your monitored
+domains are kept in the `certwatch-data` volume).
+
+### From your other devices, privately, with Tailscale
+
+Tailscale builds an encrypted private network (a *tailnet*) between your own devices. Only devices signed in to your
+tailnet can reach CertWatch, and nothing is exposed to the internet.
+
+**One-time setup:** install Tailscale on the machine that runs CertWatch and on each device you want to use, and sign in
+to the same tailnet on all of them.
+
+**Option A: Tailscale Serve (recommended).** No CertWatch configuration changes; it keeps the UI bound to
+`127.0.0.1` and lets Tailscale forward your tailnet's traffic to it over HTTPS:
+
+```bash
+docker compose up -d --build
+tailscale serve --bg 8080
+tailscale serve status          # prints the address, e.g. https://my-machine.my-tailnet.ts.net
+```
+
+Open that address from any device on your tailnet. (HTTPS must be enabled for your tailnet in the Tailscale admin
+console.) To stop sharing: `tailscale serve reset`.
+
+**Option B: bind to the Tailscale address.** Publish the UI on this machine's Tailscale address instead of the loopback
+address:
+
+```bash
+tailscale ip -4                 # for example 100.101.102.103
+cp .env.example .env            # then set CERTWATCH_BIND to that address in .env
+docker compose up -d --build
+```
+
+Open `http://100.101.102.103:8080` (or `http://<machine-name>:8080` if MagicDNS is on). The traffic is encrypted by
+Tailscale even though the URL says `http`. Start Tailscale *before* Docker, otherwise Docker cannot bind to the address.
+If binding fails on Docker Desktop (macOS/Windows), use Option A.
+
+**Never do any of these** (each one makes CertWatch reachable without a login):
+
+- run `tailscale funnel`: it publishes the service to the **public internet**;
+- set `CERTWATCH_BIND=0.0.0.0`, forward a router port to CertWatch, or open its port in a cloud firewall;
+- publish the backend port (8000).
+
+To limit which of your tailnet's devices and users can reach the machine, use
+[Tailscale ACLs](https://tailscale.com/kb/1018/acls).
 
 ## Usage
 
@@ -304,15 +369,10 @@ Pick **one** of these. They are listed from simplest to most flexible.
 **1. Local only (default).** `docker compose up --build` binds the UI to `127.0.0.1:8080`. Nothing else can reach it.
 
 **2. Private network or VPN.** Run CertWatch on a machine that is only reachable over a private network or VPN
-(WireGuard, Tailscale or similar) and bind the published port to that interface instead of the loopback address, by
-editing the `ports:` line in `docker-compose.yml`:
-
-```yaml
-    ports:
-      - "100.64.0.5:8080:8080"     # your VPN / private interface address, never 0.0.0.0
-```
-
-Add a host firewall rule so the port is not reachable from other networks.
+(Tailscale, WireGuard or similar). For Tailscale, the exact steps are in
+[Accessing CertWatch](#accessing-certwatch-private-demo). With any other VPN or private network, set `CERTWATCH_BIND`
+in `.env` to that interface's address (never `0.0.0.0`), and add a host firewall rule so the port is not reachable from
+other networks.
 
 **3. Reverse proxy with authentication.** Keep CertWatch bound to `127.0.0.1` and put an authenticating TLS proxy in
 front of it. Anything that adds real authentication is fine (basic auth, an OIDC proxy such as oauth2-proxy or

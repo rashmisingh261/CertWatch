@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Optional `CERTWATCH_BIND` setting so the Docker UI can be published on a Tailscale/VPN address without editing
+  `docker-compose.yml`. The default remains `127.0.0.1`.
+- README: private-demo notice and an "Accessing CertWatch" section covering local access and private access over Tailscale.
+- CI check that the UI is published on loopback only and that the backend port is not published.
+
 ## [1.0.0] - 2026-11-20
 
 First stable release.

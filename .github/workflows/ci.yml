@@ -79,6 +79,14 @@ jobs:
             -X POST http://127.0.0.1:8080/api/inspect \
             -H 'Content-Type: application/json' -d '{"domain":"localhost"}')" = "422"
           curl --fail --silent http://127.0.0.1:8080/api/monitor
+      - name: Verify private-only exposure
+        run: |
+          # The UI must be published on loopback only, and the backend must not be published at all.
+          docker compose port frontend 8080 | tee /dev/stderr | grep -q '^127\.0\.0\.1:'
+          if curl --silent --max-time 3 http://127.0.0.1:8000/api/health; then
+            echo "ERROR: backend port 8000 is reachable from the host" >&2
+            exit 1
+          fi
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --no-color
