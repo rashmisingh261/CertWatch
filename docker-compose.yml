@@ -1,0 +1,36 @@
+# Start CertWatch:   docker compose up --build
+# Then open:         http://localhost:8080
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      CERTWATCH_DB_PATH: /data/certwatch.db
+      # The backend is NOT published to the host: only the frontend proxy can reach it, so it is
+      # safe to trust the X-Forwarded-For header that proxy sets (used for per-client rate limits).
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - certwatch-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Healthcheck is defined in backend/Dockerfile.
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Bound to localhost on purpose: the Monitor API has no authentication.
+      # Change CERTWATCH_PORT in .env to use another host port.
+      - "127.0.0.1:${CERTWATCH_PORT:-8080}:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  certwatch-data:
